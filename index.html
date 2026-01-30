@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>THE RANKING - NO SETUP</title>
+    <style>
+        :root { --accent: #0f0; --bg: #111; }
+        body { background: var(--bg); color: var(--accent); font-family: monospace; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; user-select: none; }
+        #menu { display: flex; background: #000; border-bottom: 1px solid #333; }
+        .tab { flex: 1; padding: 15px; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; }
+        .tab.active { background: #222; border-bottom: 3px solid var(--accent); }
+        #game-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+        #display { font-size: 5em; font-weight: bold; }
+        #sub { font-size: 1.2em; color: #888; margin-top: 10px; }
+        #ranking-panel { height: 200px; background: #000; border-top: 1px solid #444; padding: 10px; overflow-y: auto; }
+        .rank-item { display: flex; justify-content: space-between; border-bottom: 1px solid #222; padding: 5px 10px; }
+        #name-box { position: absolute; top: 60px; right: 10px; color: #555; font-size: 0.8em; }
+        .countdown { color: #ff0; font-size: 8em !important; }
+    </style>
+</head>
+<body>
+
+<div id="menu">
+    <div class="tab active" onclick="switchGame('reflex')">反射神経</div>
+    <div class="tab" onclick="switchGame('clicker')">4秒連打</div>
+    <div class="tab" onclick="switchGame('timer')">10秒当て</div>
+</div>
+
+<div id="name-box">ID: <span id="user-name" style="color:var(--accent); text-decoration:underline; cursor:pointer;" onclick="changeName()">?</span></div>
+
+<div id="game-area">
+    <div id="sub">READY...</div>
+    <div id="display">START</div>
+</div>
+
+<div id="ranking-panel">
+    <div style="text-align:center; font-size:0.8em; color:#555; margin-bottom:5px;">LOCAL TOP 10 (THIS DEVICE)</div>
+    <div id="rank-list"></div>
+</div>
+
+<script>
+let curMode = 'reflex', state = 'IDLE', startTime, count = 0, gameTimer, nickname;
+
+// 1. ニックネーム初期化 (ブラウザに保存)
+function init() {
+    nickname = localStorage.getItem('reflex_nick');
+    if (!nickname) {
+        nickname = prompt("ランキング用の名前を入力:", "Player" + Math.floor(Math.random()*1000)) || "Guest";
+        localStorage.setItem('reflex_nick', nickname);
+    }
+    document.getElementById('user-name').innerText = nickname;
+    switchGame('reflex');
+}
+
+function changeName() {
+    let n = prompt("新しい名前:", nickname);
+    if(n) { nickname = n; localStorage.setItem('reflex_nick', n); location.reload(); }
+}
+
+// 2. ゲーム切り替え
+function switchGame(mode) {
+    clearTimeout(gameTimer);
+    curMode = mode; state = 'IDLE';
+    document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', ['reflex','clicker','timer'][i] === mode));
+    document.getElementById('display').innerText = 'START';
+    document.getElementById('display').classList.remove('countdown');
+    const tips = { reflex: '緑でクリック', clicker: '4秒で連打！', timer: '感覚で10秒' };
+    document.getElementById('sub').innerText = tips[mode];
+    document.getElementById('game-area').style.background = 'transparent';
+    loadRank();
+}
+
+// 3. メインロジック
+const area = document.getElementById('game-area');
+area.onmousedown = (e) => {
+    e.preventDefault();
+    if (state === 'IDLE' || state === 'RESULT') {
+        if (curMode === 'clicker') {
+            runCountdown(3, () => {
+                state = 'PLAY'; count = 1; startTime = Date.now();
+                document.getElementById('display').innerText = count;
+                gameTimer = setTimeout(() => finish(count), 4000);
+            });
+        } else if (curMode === 'reflex') {
+            state = 'WAIT';
+            document.getElementById('display').innerText = '...';
+            gameTimer = setTimeout(() => {
+                state = 'PLAY'; startTime = Date.now();
+                area.style.background = '#0f0';
+                document.getElementById('display').innerText = 'NOW!';
+            }, Math.random() * 3000 + 2000);
+        } else if (curMode === 'timer') {
+            state = 'PLAY'; startTime = Date.now();
+            document.getElementById('display').innerText = 'STOP!';
+        }
+    } else if (state === 'WAIT' && curMode === 'reflex') {
+        clearTimeout(gameTimer); alert('早すぎ！'); switchGame('reflex');
+    } else if (state === 'PLAY') {
+        if (curMode === 'reflex') finish((Date.now() - startTime)/1000);
+        if (curMode === 'clicker') { count++; document.getElementById('display').innerText = count; }
+        if (curMode === 'timer') finish(Math.abs(10 - (Date.now() - startTime)/1000));
+    }
+};
+
+function runCountdown(num, callback) {
+    state = 'COUNTDOWN';
+    const disp = document.getElementById('display');
+    disp.classList.add('countdown');
+    const cd = () => {
+        if (num > 0) { disp.innerText = num; num--; gameTimer = setTimeout(cd, 800); }
+        else { disp.innerText = 'GO!'; disp.classList.remove('countdown'); setTimeout(callback, 200); }
+    };
+    cd();
+}
+
+function finish(score) {
+    state = 'RESULT';
+    area.style.background = 'transparent';
+    const unit = curMode === 'clicker' ? '回' : '秒';
+    document.getElementById('display').innerText = score.toFixed(3).replace(/\.000$/,'') + unit;
+    document.getElementById('sub').innerText = 'RETRY?';
+    saveRank(nickname, score);
+}
+
+// 4. ローカルランキング保存
+function saveRank(name, score) {
+    let ranks = JSON.parse(localStorage.getItem('rank_' + curMode) || '[]');
+    ranks.push({name, score});
+    if (curMode === 'clicker') ranks.sort((a, b) => b.score - a.score);
+    else ranks.sort((a, b) => a.score - b.score);
+    localStorage.setItem('rank_' + curMode, JSON.stringify(ranks.slice(0, 10)));
+    loadRank();
+}
+
+function loadRank() {
+    const ranks = JSON.parse(localStorage.getItem('rank_' + curMode) || '[]');
+    document.getElementById('rank-list').innerHTML = ranks.map((r, i) => 
+        `<div class="rank-item"><span>${i+1}. ${r.name}</span><span>${r.score.toFixed(3)}${curMode==='clicker'?'回':'s'}</span></div>`
+    ).join('');
+}
+
+init();
+</script>
+</body>
+</html>
